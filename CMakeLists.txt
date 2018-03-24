@@ -40,57 +40,88 @@ find_package(PkgConfig REQUIRED)
 # Dependency list
 set(rawrtcdc_DEP_LIBRARIES)
 
-# Apple-specific dependencies
-# TODO: This should probably be in libre's pkg-config file in Libs.private
-if (APPLE)
-    find_library(LIB_SYSTEM_CONFIGURATION_LIBRARIES NAMES SystemConfiguration)
-    find_library(LIB_CORE_FOUNDATION_LIBRARIES NAMES CoreFoundation)
-    list(APPEND rawrtcdc_DEP_LIBRARIES
-            ${LIB_SYSTEM_CONFIGURATION_LIBRARIES}
-            ${LIB_CORE_FOUNDATION_LIBRARIES})
-endif ()
+# find brew version of openssl on osx
+set(ENV{PKG_CONFIG_PATH} "$ENV{PKG_CONFIG_PATH}:/usr/local/opt/openssl/lib/pkgconfig")
 
-# Dependency: libre
-pkg_check_modules(LIB_RE REQUIRED ${LIB_RE_VERSION})
-include_directories(${LIB_RE_STATIC_INCLUDE_DIRS} ${LIB_RE_STATIC_INCLUDEDIR})
-link_directories(${LIB_RE_STATIC_LIBRARY_DIRS})
-list(APPEND rawrtcdc_DEP_LIBRARIES ${LIB_RE_STATIC_LIBRARIES})
+pkg_check_modules(OPENSSL REQUIRED openssl>=1.0.2)
 
-# Dependency: usrsctp
-# TODO: Use the pkg-config file of usrsctp once it has been added
-find_library(LIB_USRSCTP_LIBRARIES NAMES usrsctp.a libusrsctp.a HINTS ${CMAKE_INSTALL_PREFIX}/lib )
-find_path(LIB_USRSCTP_INCLUDE_DIRS usrsctp.h HINTS ${CMAKE_INSTALL_PREFIX}/include )
-get_filename_component(LIB_USRSCTP_LIBRARY_DIRS ${LIB_USRSCTP_LIBRARIES} DIRECTORY)
-include_directories(${LIB_USRSCTP_INCLUDE_DIRS})
-link_directories(${LIB_USRSCTP_LIBRARY_DIRS})
-list(APPEND rawrtcdc_DEP_LIBRARIES ${LIB_USRSCTP_LIBRARIES})
+include(ExternalProject)
+set(USRSCTP_CFLAGS "-Wno-address-of-packed-member; -fPIC; -Wno-unknown-warning-option")
+ExternalProject_Add(usrsctp
+    GIT_REPOSITORY  https://github.com/rawrtc/usrsctp.git
+    GIT_TAG         "eabbea6cfb4dac224e082fc021b568ec9a731c0b"
+    CMAKE_ARGS      -DCMAKE_C_FLAGS=${USRSCTP_CFLAGS};-DCMAKE_INSTALL_PREFIX=<INSTALL_DIR>;-DSCTP_DEBUG=ON;-DTHREAD_SUPPORT=OFF
+)
 
-# Dependency: librawrtcc
-pkg_check_modules(LIB_RAWRTCC REQUIRED ${LIB_RAWRTCC_VERSION})
-include_directories(${LIB_RAWRTCC_STATIC_INCLUDE_DIRS} ${LIB_RAWRTCC_INCLUDEDIR})
-link_directories(${LIB_RAWRTCC_STATIC_LIBRARY_DIRS})
-list(APPEND rawrtcdc_DEP_LIBRARIES ${LIB_RAWRTCC_STATIC_LIBRARIES})
+find_program(MAKE_EXE NAMES gmake nmake make)
+ExternalProject_Add(libre
+    GIT_REPOSITORY  https://github.com/rawrtc/re.git
+    GIT_TAG         "7d837903ac78bbfbc56e2efb21315665d1834f1e"
+    CONFIGURE_COMMAND "" 
+    BUILD_IN_SOURCE  true
+    BUILD_COMMAND    SYSROOT_ALT=${OPENSSL_PREFIX} PREFIX=<INSTALL_DIR> ${MAKE_EXE} info
+    INSTALL_COMMAND  SYSROOT_ALT=${OPENSSL_PREFIX} PREFIX=<INSTALL_DIR> ${MAKE_EXE} install
+)
+ExternalProject_Get_property(libre INSTALL_DIR)
 
-# Dependency versions
-set(PKG_CONFIG_REQUIRES "")
-set(PKG_CONFIG_REQUIRES_PRIVATE "${DEPENDENCY_VERSIONS}")
-
-# Linker flags (includes libs that have no pkg-config files)
-set(PKG_CONFIG_LIB_DIRS "-L\${libdir}")
-set(PKG_CONFIG_LIBRARIES "-lrawrtcdc")
-set(PKG_CONFIG_LIBS "${PKG_CONFIG_LIB_DIRS} ${PKG_CONFIG_LIBRARIES}")
-set(PKG_CONFIG_LIB_DIRS_PRIVATE "${PKG_CONFIG_LIB_DIRS} -L${LIB_USRSCTP_LIBRARY_DIRS}")
-set(PKG_CONFIG_LIBRARIES_PRIVATE "${PKG_CONFIG_LIBRARIES} ${LIB_USRSCTP_LIBRARIES}")
-set(PKG_CONFIG_LIBS_PRIVATE "${PKG_CONFIG_LIB_DIRS_PRIVATE} ${PKG_CONFIG_LIBRARIES_PRIVATE}")
-
-# Cflags (includes includes that have no pkg-config files)
-set(PKG_CONFIG_CFLAGS "-I\${includedir} -I${LIB_USRSCTP_INCLUDE_DIRS}")
-
-# Add custom target to install the library
-add_custom_target(install-${PROJECT_NAME}
-        $(MAKE) install
-        COMMENT "Installing ${PROJECT_NAME}")
-
-# Walk through subdirectories
-add_subdirectory(docs)
-add_subdirectory(src)
+set(ENV{PKG_CONFIG_PATH} "$ENV{PKG_CONFIG_PATH}:${INSTALL_DIR}/lib/pkgconfig")
+ExternalProject_Add(rawrtc
+    GIT_REPOSITORY  https://github.com/rawrtc/rawrtc-common.git
+    GIT_TAG         master
+    CONFIGURE_COMMAND PKG_CONFIG_PATH=$ENV{PKG_CONFIG_PATH} ${CMAKE_COMMAND}
+)
+    
+## Apple-specific dependencies
+## TODO: This should probably be in libre's pkg-config file in Libs.private
+#if (APPLE)
+#    find_library(LIB_SYSTEM_CONFIGURATION_LIBRARIES NAMES SystemConfiguration)
+#    find_library(LIB_CORE_FOUNDATION_LIBRARIES NAMES CoreFoundation)
+#    list(APPEND rawrtcdc_DEP_LIBRARIES
+#            ${LIB_SYSTEM_CONFIGURATION_LIBRARIES}
+#            ${LIB_CORE_FOUNDATION_LIBRARIES})
+#endif ()
+#
+## Dependency: libre
+#pkg_check_modules(LIB_RE REQUIRED ${LIB_RE_VERSION})
+#include_directories(${LIB_RE_STATIC_INCLUDE_DIRS} ${LIB_RE_STATIC_INCLUDEDIR})
+#link_directories(${LIB_RE_STATIC_LIBRARY_DIRS})
+#list(APPEND rawrtcdc_DEP_LIBRARIES ${LIB_RE_STATIC_LIBRARIES})
+#
+## Dependency: usrsctp
+## TODO: Use the pkg-config file of usrsctp once it has been added
+#find_library(LIB_USRSCTP_LIBRARIES NAMES usrsctp.a libusrsctp.a HINTS ${CMAKE_INSTALL_PREFIX}/lib )
+#find_path(LIB_USRSCTP_INCLUDE_DIRS usrsctp.h HINTS ${CMAKE_INSTALL_PREFIX}/include )
+#get_filename_component(LIB_USRSCTP_LIBRARY_DIRS ${LIB_USRSCTP_LIBRARIES} DIRECTORY)
+#include_directories(${LIB_USRSCTP_INCLUDE_DIRS})
+#link_directories(${LIB_USRSCTP_LIBRARY_DIRS})
+#list(APPEND rawrtcdc_DEP_LIBRARIES ${LIB_USRSCTP_LIBRARIES})
+#
+## Dependency: librawrtcc
+#pkg_check_modules(LIB_RAWRTCC REQUIRED ${LIB_RAWRTCC_VERSION})
+#include_directories(${LIB_RAWRTCC_STATIC_INCLUDE_DIRS} ${LIB_RAWRTCC_INCLUDEDIR})
+#link_directories(${LIB_RAWRTCC_STATIC_LIBRARY_DIRS})
+#list(APPEND rawrtcdc_DEP_LIBRARIES ${LIB_RAWRTCC_STATIC_LIBRARIES})
+#
+## Dependency versions
+#set(PKG_CONFIG_REQUIRES "")
+#set(PKG_CONFIG_REQUIRES_PRIVATE "${DEPENDENCY_VERSIONS}")
+#
+## Linker flags (includes libs that have no pkg-config files)
+#set(PKG_CONFIG_LIB_DIRS "-L\${libdir}")
+#set(PKG_CONFIG_LIBRARIES "-lrawrtcdc")
+#set(PKG_CONFIG_LIBS "${PKG_CONFIG_LIB_DIRS} ${PKG_CONFIG_LIBRARIES}")
+#set(PKG_CONFIG_LIB_DIRS_PRIVATE "${PKG_CONFIG_LIB_DIRS} -L${LIB_USRSCTP_LIBRARY_DIRS}")
+#set(PKG_CONFIG_LIBRARIES_PRIVATE "${PKG_CONFIG_LIBRARIES} ${LIB_USRSCTP_LIBRARIES}")
+#set(PKG_CONFIG_LIBS_PRIVATE "${PKG_CONFIG_LIB_DIRS_PRIVATE} ${PKG_CONFIG_LIBRARIES_PRIVATE}")
+#
+## Cflags (includes includes that have no pkg-config files)
+#set(PKG_CONFIG_CFLAGS "-I\${includedir} -I${LIB_USRSCTP_INCLUDE_DIRS}")
+#
+## Add custom target to install the library
+#add_custom_target(install-${PROJECT_NAME}
+#        $(MAKE) install
+#        COMMENT "Installing ${PROJECT_NAME}")
+#
+## Walk through subdirectories
+#add_subdirectory(docs)
+#add_subdirectory(src)
